@@ -22,10 +22,12 @@ import (
 
 func main() {
 
+	//加载配置文件.
 	configFilePath := flag.String("C", "conf/conf.yaml", "config file path")
 	logConfigPath := flag.String("L", "conf/seelog.xml", "log config file path")
 	flag.Parse()
 
+	//加载配置log.
 	logger, err := seelog.LoggerFromConfigAsFile(*logConfigPath)
 	if err != nil {
 		seelog.Critical("err parsing seelog config file", err)
@@ -34,6 +36,7 @@ func main() {
 	seelog.ReplaceLogger(logger)
 	defer seelog.Flush()
 
+	//加载yaml配置文件进全局结构体:system.Configuration
 	if err := system.LoadConfiguration(*configFilePath); err != nil {
 		seelog.Critical("err parsing config log file", err)
 		return

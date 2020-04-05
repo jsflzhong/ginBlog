@@ -38,6 +38,9 @@ const (
 
 var configuration *Configuration
 
+/*
+加载yaml配置文件进全局结构体:Configuration
+*/
 func LoadConfiguration(path string) error {
 	data, err := ioutil.ReadFile(path)
 	if err != nil {
