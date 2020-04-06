@@ -22,12 +22,10 @@ import (
 
 func main() {
 
-	//加载配置文件.
-	configFilePath := flag.String("C", "conf/conf.yaml", "config file path")
-	logConfigPath := flag.String("L", "conf/seelog.xml", "log config file path")
-	flag.Parse()
+	//1.加载配置文件.
+	configFilePath, logConfigPath := LoadConfigFiles()
 
-	//加载配置log.
+	//2/加载配置log.
 	logger, err := seelog.LoggerFromConfigAsFile(*logConfigPath)
 	if err != nil {
 		seelog.Critical("err parsing seelog config file", err)
@@ -36,12 +34,13 @@ func main() {
 	seelog.ReplaceLogger(logger)
 	defer seelog.Flush()
 
-	//加载yaml配置文件进全局结构体:system.Configuration
+	//3.加载yaml配置文件进全局结构体:system.Configuration
 	if err := system.LoadConfiguration(*configFilePath); err != nil {
 		seelog.Critical("err parsing config log file", err)
 		return
 	}
 
+	//4.创建DB连接,表,索引.
 	db, err := models.InitDB()
 	if err != nil {
 		seelog.Critical("err open databases", err)
@@ -49,20 +48,41 @@ func main() {
 	}
 	defer db.Close()
 
+	//5.配置routers
+	router := SetRouters()
+
+	//6.配置定时任务.
+	SetJobs()
+
+	//7.启动系统.
+	router.Run(system.GetConfiguration().Addr)
+}
+
+func LoadConfigFiles() (*string, *string) {
+	configFilePath := flag.String("C", "conf/conf.yaml", "config file path")
+	logConfigPath := flag.String("L", "conf/seelog.xml", "log config file path")
+	flag.Parse()
+	return configFilePath, logConfigPath
+}
+
+func SetRouters() *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.Default()
-
 	setTemplate(router)
 	setSessions(router)
 	router.Use(SharedData())
+	SetStaticRouter(router)
+	SetRootRouter(router)
+	SetVisitorRouterGroup(router)
+	SetAdminRouterGroup(router)
+	return router
+}
 
-	//Periodic tasks
-	gocron.Every(1).Day().Do(controllers.CreateXMLSitemap)
-	gocron.Every(7).Days().Do(controllers.Backup)
-	gocron.Start()
+func SetStaticRouter(router *gin.Engine) gin.IRoutes {
+	return router.Static("/static", filepath.Join(getCurrentDirectory(), "./static"))
+}
 
-	router.Static("/static", filepath.Join(getCurrentDirectory(), "./static"))
-
+func SetRootRouter(router *gin.Engine) {
 	router.NoRoute(controllers.Handle404)
 	router.GET("/", controllers.IndexGet)
 	router.GET("/index", controllers.IndexGet)
@@ -82,13 +102,6 @@ func main() {
 	// captcha
 	router.GET("/captcha", controllers.CaptchaGet)
 
-	visitor := router.Group("/visitor")
-	visitor.Use(AuthRequired())
-	{
-		visitor.POST("/new_comment", controllers.CommentPost)
-		visitor.POST("/comment/:id/delete", controllers.CommentDelete)
-	}
-
 	// subscriber
 	router.GET("/subscribe", controllers.SubscribeGet)
 	router.POST("/subscribe", controllers.Subscribe)
@@ -101,7 +114,9 @@ func main() {
 	router.GET("/archives/:year/:month", controllers.ArchiveGet)
 
 	router.GET("/link/:id", controllers.LinkGet)
+}
 
+func SetAdminRouterGroup(router *gin.Engine) {
 	authorized := router.Group("/admin")
 	authorized.Use(AdminScopeRequired())
 	{
@@ -165,10 +180,24 @@ func main() {
 		authorized.POST("/new_mail", controllers.SendMail)
 		authorized.POST("/new_batchmail", controllers.SendBatchMail)
 	}
-
-	router.Run(system.GetConfiguration().Addr)
 }
 
+func SetVisitorRouterGroup(router *gin.Engine) {
+	visitor := router.Group("/visitor")
+	visitor.Use(AuthRequired())
+	{
+		visitor.POST("/new_comment", controllers.CommentPost)
+		visitor.POST("/comment/:id/delete", controllers.CommentDelete)
+	}
+}
+
+func SetJobs() {
+	gocron.Every(1).Day().Do(controllers.CreateXMLSitemap)
+	gocron.Every(7).Days().Do(controllers.Backup)
+	gocron.Start()
+}
+
+//fixme: ?
 func setTemplate(engine *gin.Engine) {
 
 	funcMap := template.FuncMap{
@@ -191,6 +220,7 @@ func setSessions(router *gin.Engine) {
 	config := system.GetConfiguration()
 	//https://github.com/gin-gonic/contrib/tree/master/sessions
 	store := sessions.NewCookieStore([]byte(config.SessionSecret))
+	//7 days
 	store.Options(sessions.Options{HttpOnly: true, MaxAge: 7 * 86400, Path: "/"}) //Also set Secure: true if using SSL, you should though
 	router.Use(sessions.Sessions("gin-session", store))
 	//https://github.com/utrack/gin-csrf
@@ -206,12 +236,14 @@ func setSessions(router *gin.Engine) {
 //+++++++++++++ middlewares +++++++++++++++++++++++
 
 //SharedData fills in common data, such as user info, etc...
+//Put user's info into context.
 func SharedData() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		session := sessions.Default(c)
 		if uID := session.Get(controllers.SESSION_KEY); uID != nil {
 			user, err := models.GetUser(uID)
 			if err == nil {
+				seelog.Debugf("@@@[SharedData],put user from session into context: %s", user)
 				c.Set(controllers.CONTEXT_USER_KEY, user)
 			}
 		}

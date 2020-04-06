@@ -2,17 +2,16 @@ package models
 
 import (
 	"database/sql"
+	"flag"
 	"fmt"
+	"github.com/microcosm-cc/bluemonday"
+	"github.com/russross/blackfriday"
 	"html/template"
 	"strconv"
 	"time"
 
 	"github.com/jinzhu/gorm"
 	_ "github.com/mattn/go-sqlite3"
-	//_ "github.com/go-sql-driver/mysql"
-	"github.com/microcosm-cc/bluemonday"
-	"github.com/russross/blackfriday"
-	"wblog/system"
 )
 
 // I don't need soft delete,so I use customized BaseModel instead gorm.Model
@@ -130,17 +129,32 @@ type SmmsFile struct {
 
 var DB *gorm.DB
 
+/*
+建立DB的连接,并初始化表.
+*/
 func InitDB() (*gorm.DB, error) {
-	db, err := gorm.Open("sqlite3", system.GetConfiguration().DSN)
-	//db, err := gorm.Open("mysql", "root:mysql@/wblog?charset=utf8&parseTime=True&loc=Asia/Shanghai")
+	//db, err := gorm.Open("sqlite3", system.GetConfiguration().DSN)
+	db, err := gorm.Open("mysql", buildDBString())
 	if err == nil {
 		DB = db
 		//db.LogMode(true)
+		db.SingularTable(true)
+		//创建表
 		db.AutoMigrate(&Page{}, &Post{}, &Tag{}, &PostTag{}, &User{}, &Comment{}, &Subscriber{}, &Link{}, &SmmsFile{})
+		//创建索引
 		db.Model(&PostTag{}).AddUniqueIndex("uk_post_tag", "post_id", "tag_id")
 		return db, err
 	}
 	return nil, err
+}
+
+func buildDBString() string {
+	dbPassword := flag.String("db_password", "nil", "The password of db connection")
+	dbUrl := flag.String("db_url", "nil", "The url of db connection")
+	flag.Parse()
+	dbString := fmt.Sprintf("root:%s@tcp(%s:3306)/wblog?charset=utf8", *dbPassword, *dbUrl)
+	fmt.Println("@@@dbString:", dbString)
+	return dbString
 }
 
 // Page
@@ -236,6 +250,7 @@ func (post *Post) Excerpt() template.HTML {
 	return excerpt
 }
 
+//分页查询数据
 func ListPublishedPost(tag string, pageIndex, pageSize int) ([]*Post, error) {
 	return _listPost(tag, true, pageIndex, pageSize)
 }

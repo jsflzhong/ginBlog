@@ -59,6 +59,7 @@ func CommentPost(c *gin.Context) {
 		res["message"] = err.Error()
 		return
 	}
+	//fixme: 为什么要给配置中的emails发邮件? 而不是给当前登录的账号发?
 	NotifyEmail("[wblog]您有一条新评论", fmt.Sprintf("<a href=\"%s/post/%d\" target=\"_blank\">%s</a>:%s", system.GetConfiguration().Domain, post.ID, post.Title, content))
 	res["succeed"] = true
 }

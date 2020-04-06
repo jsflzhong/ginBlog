@@ -84,6 +84,7 @@ func SignupPost(c *gin.Context) {
 		res["message"] = "email or password cannot be null"
 		return
 	}
+	//fixme: email + pswd?  but username + pswd in login handler!
 	user.Password = helpers.Md5(user.Email + user.Password)
 	err = user.Insert()
 	if err != nil {
